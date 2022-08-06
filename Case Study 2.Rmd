@@ -1,0 +1,334 @@
+---
+title: "caseStudy2"
+author: "Tadd Backus"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Introduction and Overview
+In this report, we explore the employee attrition dataset. This dataset contains
+employees who have either left a company or not as well as 37 different variables
+potentially relating to this. The steps and procedures taken for this analysis 
+are detailed below. We start by looking at the most important factors for employee
+attrition and then any trends for different job roles. Finally, we create two 
+prediction models, one classifier to predict attrition and one linear regression
+to predict monthly income.
+
+# Useful Links
+
+* [`GitHub`](https://github.com/taddbackus/CaseStudy2DDS):
+This link contains all of the data, R code, and power points.
+
+* ['Employee Attrition App'](https://tbackus.shinyapps.io/EmployeeAttrition/?_ga=2.59679213.1944325347.1659738568-2039603706.1659738568):
+This link contains an R Shiny app that allows the user to explore the attrition rates 
+of different job roles and education fields, as well as the monthly income.
+
+* ['Presentation of Results - YouTube'](https://www.youtube.com/watch?v=iC9egHIgbzw):
+Video of the presentation of results of Employee Attrition analysis.
+
+* [`README.md`](https://github.com/tadbackus/CaseStudy2DDS/blob/main/README.md): 
+This page shows an introduction to the analysis we ran. It also includes a few 
+details about the datasets provided.
+
+* [`Beers.csv`](https://github.com/tadbackus/CaseStudy2DDS/blob/main/CaseStudy2-data.csv) 
+ 
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load packages
+library(aws.s3)
+library(RCurl)
+library(class)
+library(caret)
+library(e1071)
+library(tidyr)
+library(tidyverse)
+library(olsrr)
+library(forecast)
+
+```
+
+```{r, echo=FALSE}
+attrData = read.csv('/Users/taddbackus/School/summer22/doingDataScience/caseStudy2/CaseStudy2-data.csv',header=TRUE)
+attrTest = read.csv('/Users/taddbackus/School/summer22/doingDataScience/caseStudy2/CaseStudy2CompSet No Attrition.csv',header=TRUE)
+miTest = read.csv('/Users/taddbackus/School/summer22/doingDataScience/caseStudy2/CaseStudy2CompSet No Salary.csv',header=TRUE)
+
+options(scipen=999)  
+
+aDF = attrData
+aDF$Department = factor(aDF$Department)
+aDF$EducationField = factor(aDF$EducationField)
+aDF$BusinessTravel = factor(aDF$BusinessTravel)
+aDF$Gender = factor(aDF$Gender)
+aDF$JobRole = factor(aDF$JobRole)
+aDF$MaritalStatus = factor(aDF$MaritalStatus)
+aDF$OverTime = factor(aDF$OverTime)
+aDF$Attrition = factor(aDF$Attrition)
+
+attrY <- aDF %>% filter(Attrition=='Yes')
+attrN <- aDF %>% filter(Attrition=='No')
+```
+
+### This section looks at factors that have a large impact on employee attrition.  
+The bar graph below shows the amount of employees that left and stayed for each of the departments.
+```{r, echo=FALSE}
+# Attrition Analysis
+# Job Role/Department
+ggplot(aDF,aes(x=Department,fill=Attrition))+
+  geom_bar()+
+  coord_flip()+
+  ggtitle('Attrition by Department')+
+  ylab('Count')+
+  xlab('Department')
+```
+
+Below are the numbers for employees who left.
+```{r, echo=FALSE}
+summary(attrY$Department)
+```
+Below are the numbers for employees who stayed
+```{r, echo=FALSE}
+summary(attrN$Department)
+```
+
+The bar graph below shows the amount of employees that left and stayed for each individual job role.
+```{r, echo=FALSE}
+ggplot(aDF,aes(x=JobRole,fill=Attrition))+
+  geom_bar()+
+  coord_flip()+
+  ggtitle('Attrition by Job Role')+
+  ylab('Count')+
+  xlab('Job Role')
+```
+
+Below are the numbers for employees who left.
+```{r, echo=FALSE}
+summary(attrY$JobRole)
+```
+Below are the numbers for employees who stayed.
+```{r, echo=FALSE}
+summary(attrN$JobRole)
+```
+
+This plot shows combinations of education field and job role and whether or not the employee left.
+```{r, echo=FALSE}
+ggplot(aDF,aes(x=EducationField,y=JobRole,color=Attrition))+
+  geom_point(position='jitter')+
+  ggtitle('Attrition of Job Roles by Education Field')+
+  xlab('Education Field')+
+  ylab('Job')
+```
+
+These graphs show the distributions of log transformed monthly incomes for the corresponding attrition.
+```{r, echo=FALSE}
+# Monthly Income
+ggplot(aDF,aes(x=log(MonthlyIncome),y=Attrition,fill=Attrition))+
+  geom_boxplot()+
+  ggtitle('Attrition based on Monthly Income')+
+  xlab('Monthly Income')
+
+ggplot(aDF,aes(x=log(MonthlyIncome),fill=Attrition))+
+  geom_histogram(bins=20)+
+  facet_wrap(~Attrition)+
+  ggtitle('Histogram of Monthly Incomes')+
+  xlab('Monthly Income')+
+  ylab('Count')
+```
+
+The results of a two sample t-test on the monthly income data.
+```{r, echo=FALSE}
+t.test(x=log(attrY$MonthlyIncome), y=log(attrN$MonthlyIncome), conf.int=.95, var.equal=TRUE, alternative="two.sided")
+```
+There is evidence to suggest that the median income for workers who quit is lower than workers who did not quit
+(p-value<0.0000001)
+
+This barplot shows how many employees left based on whether or not they worked over time.
+```{r, echo=FALSE}
+# Over Time
+ggplot(aDF,aes(x=OverTime,fill=Attrition))+
+  geom_bar()+
+  ggtitle('Attrition for Over Time workers')+
+  xlab('Count')+
+  ylab('Over Time status')
+```
+
+Below are the numbers for employees who left.
+```{r, echo=FALSE}
+summary(attrY$OverTime)
+```
+Below are the numbers for employees who stayed.
+```{r, echo=FALSE}
+summary(attrN$OverTime)
+```
+
+This boxplot shows the distribution of monthly incomes for each job role.
+```{r, echo=FALSE}
+# Job Role Analysis
+# Monthly Income
+ggplot(aDF,aes(x=MonthlyIncome,y=JobRole,fill=Attrition))+
+  geom_boxplot()+
+  ggtitle('Monthly Income for Job Roles')+
+  xlab('Monthly Income')+
+  ylab('Job Role')
+```
+
+Plotting job satisfaction for each job role.
+```{r, echo=FALSE}
+# Job Satisfaction
+ggplot(aDF,aes(x=JobSatisfaction,y=JobRole,color=Attrition))+
+  geom_point(position='jitter')+
+  ggtitle('Job Role and Satisfaction')+
+  xlab('Job Satisfaction')+
+  ylab('Job Role')
+```
+
+
+```{r, echo=FALSE}
+attrModel = attrTest
+happyKnn = subset(aDF, select=c(Attrition,Age,DistanceFromHome,EnvironmentSatisfaction,
+                                JobSatisfaction,RelationshipSatisfaction,WorkLifeBalance))
+payKnn = subset(aDF, select=c(Attrition,Age,DailyRate,HourlyRate,MonthlyIncome,MonthlyRate,
+                              PercentSalaryHike,PerformanceRating,StockOptionLevel))
+yearKnn = subset(aDF, select=c(Attrition,Age,Education,JobLevel,JobInvolvement,JobSatisfaction,
+                               NumCompaniesWorked,TotalWorkingYears,TrainingTimesLastYear,
+                               YearsAtCompany,YearsInCurrentRole,YearsSinceLastPromotion,
+                               YearsWithCurrManager))
+happyNB = subset(aDF, select=c(Attrition,Age,DistanceFromHome,
+                               EnvironmentSatisfaction,JobSatisfaction,
+                               RelationshipSatisfaction,WorkLifeBalance,
+                               Gender,JobRole,OverTime,MaritalStatus))
+payNB = subset(aDF, select=c(Attrition,Age,DailyRate,HourlyRate,MonthlyIncome,
+                             MonthlyRate,PercentSalaryHike,PerformanceRating,
+                             StockOptionLevel,Department,EducationField,
+                             Gender,JobRole))
+yearNB = subset(aDF, select=c(Attrition,Age,Education,JobLevel,JobInvolvement,
+                              JobSatisfaction,NumCompaniesWorked,TotalWorkingYears,
+                              TrainingTimesLastYear,YearsAtCompany,YearsInCurrentRole,
+                              YearsSinceLastPromotion,YearsWithCurrManager))
+```
+
+Variables used in the "Happiness" kNN Model.
+```{r, echo=FALSE}
+summary(happyKnn)
+```
+
+Variables used in the "Pay" kNN Model.
+```{r, echo=FALSE}
+summary(payKnn)
+```
+
+Variables used in the "Experience" kNN Model.
+```{r, echo=FALSE}
+summary(yearKnn)
+```
+
+Variables used in the "Happiness" Naive Bayes Model.
+```{r, echo=FALSE}
+summary(happyNB)
+```
+
+Variables used in the "Pay" Naive Bayes Model.
+```{r, echo=FALSE}
+summary(payNB)
+```
+
+Variables used in the "Experience" Naive Bayes Model.
+```{r, echo=FALSE}
+summary(yearNB)
+```
+
+```{r, echo=FALSE}
+happyKnnTest = subset(attrModel, select=c(Age,DistanceFromHome,EnvironmentSatisfaction,
+                                JobSatisfaction,RelationshipSatisfaction,WorkLifeBalance))
+payKnnTest = subset(attrModel, select=c(Age,DailyRate,HourlyRate,MonthlyIncome,MonthlyRate,
+                              PercentSalaryHike,PerformanceRating,StockOptionLevel))
+yearKnnTest = subset(attrModel, select=c(Age,Education,JobLevel,JobInvolvement,JobSatisfaction,
+                               NumCompaniesWorked,TotalWorkingYears,TrainingTimesLastYear,
+                               YearsAtCompany,YearsInCurrentRole,YearsSinceLastPromotion,
+                               YearsWithCurrManager))
+happyNBTest = subset(attrModel, select=c(Age,DistanceFromHome,
+                               EnvironmentSatisfaction,JobSatisfaction,
+                               RelationshipSatisfaction,WorkLifeBalance,
+                               Gender,JobRole,OverTime,MaritalStatus))
+payNBTest = subset(attrModel, select=c(Age,DailyRate,HourlyRate,MonthlyIncome,
+                             MonthlyRate,PercentSalaryHike,PerformanceRating,
+                             StockOptionLevel,Department,EducationField,
+                             Gender,JobRole))
+yearNBTest = subset(attrModel, select=c(Age,Education,JobLevel,JobInvolvement,
+                              JobSatisfaction,NumCompaniesWorked,TotalWorkingYears,
+                              TrainingTimesLastYear,YearsAtCompany,YearsInCurrentRole,
+                              YearsSinceLastPromotion,YearsWithCurrManager))
+
+happyKnnMod = train(happyKnn[,2:7],happyKnn$Attrition,method='knn')
+payKnnMod = train(payKnn[,2:9],payKnn$Attrition,method='knn')
+yearKnnMod = train(yearKnn[,2:13],yearKnn$Attrition,method='knn')
+
+happyNBMod = naiveBayes(happyNB[,2:11],happyNB$Attrition)
+payNBMod = naiveBayes(payNB[,2:13],payNB$Attrition)
+yearNBMod = naiveBayes(yearNB[,2:13],yearNB$Attrition)
+
+attrModel$happyKnnPred = predict(object=happyKnnMod,happyKnnTest[,1:6])
+attrModel$payKnnPred = predict(object=payKnnMod,payKnnTest[,1:8])
+attrModel$yearKnnPred = predict(object=yearKnnMod,yearKnnTest[,1:12])
+attrModel$happyKnnProb = predict(object=happyKnnMod,happyKnnTest[,1:6],type='prob')
+attrModel$payKnnProb = predict(object=payKnnMod,payKnnTest[,1:8],type='prob')
+attrModel$yearKnnProb = predict(object=yearKnnMod,yearKnnTest[,1:12],type='prob')
+
+attrModel$happyNBPred = predict(happyNBMod,happyNBTest[,1:10])
+attrModel$payNBPred = predict(payNBMod,payNBTest[,1:12])
+attrModel$yearNBPred = predict(yearNBMod,yearNBTest[,1:12])
+attrModel$happyNBProb = predict(happyNBMod,happyNBTest[,1:10],'raw')
+attrModel$payNBProb = predict(payNBMod,payNBTest[,1:12],'raw')
+attrModel$yearNBProb = predict(yearNBMod,yearNBTest[,1:12],'raw')
+
+attrModel$probAvgNB = (attrModel$happyNBProb[,'Yes']+attrModel$payNBProb[,'Yes']+attrModel$yearNBProb[,'Yes'])/3
+attrModel$probWeightNB = attrModel$happyNBProb[,'Yes']*.4+attrModel$payNBProb[,'Yes']*.2+attrModel$yearNBProb[,'Yes']*.4
+
+attrModel$probAvgKnn = (attrModel$happyKnnProb$Yes+attrModel$payKnnProb$Yes+attrModel$yearKnnProb$Yes)/3
+attrModel$probWeightKnn = attrModel$happyKnnProb$Yes*.6+attrModel$payKnnProb$Yes*.2+attrModel$yearKnnProb$Yes*.2
+
+attrModel$probAvg = (attrModel$probAvgNB+attrModel$probAvgKnn)/2
+attrModel$probWeight = (attrModel$probWeightNB+attrModel$probWeightKnn)/2
+
+attrModel$predAvg = as.factor(ifelse(attrModel$probAvg>0.5,'Yes','No'))
+attrModel$predWeight = as.factor(ifelse(attrModel$probWeight>0.5,'Yes','No'))
+
+classPred = subset(attrModel, select=c(ID,predWeight))
+```
+
+Combined model = (weighted kNN + weighted NB)/2
+Weighted kNN = happiness X 0.6 + pay X 0.2 + experience X 0.2
+Weight NB = happines X 0.4 + pay X 0.2 + experience X 0.4
+
+Creating the linear regression model to predict monthly income.
+Variables used in the model.
+```{r, echo=FALSE}
+miModel = miTest
+fullFit = lm(MonthlyIncome~JobLevel+JobRole+TotalWorkingYears+DistanceFromHome+
+               Age+PerformanceRating+YearsAtCompany+YearsSinceLastPromotion+OverTime,data=aDF)
+summary(fullFit)
+MonthlyIncome = predict(fullFit,newdata=miModel)
+miPred = cbind(miModel,MonthlyIncome)
+miPred = subset(miPred,select=c(ID,MonthlyIncome))
+```
+Performance of the model
+```{r, echo=FALSE}
+CV(fullFit)
+```
+RMSE of the linear regression model
+```{r,echo = FALSE}
+sqrt(mean(fullFit$residuals^2))
+```
+Plot of fitted values for monthly income and the originals
+```{r, echo=FALSE}
+aDF$lmPred = fullFit$fitted.values
+ggplot(aDF,aes(x=lmPred,y=MonthlyIncome))+
+  geom_point()+
+  geom_smooth(method='lm')+
+  ggtitle('Linear Regression for Monthly Income')+
+  xlab('Predicted Values')+
+  ylab('Monthly Income')
+
